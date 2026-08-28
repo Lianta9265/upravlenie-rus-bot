@@ -1,0 +1,17 @@
+{
+  "rosenthal_gramota": {
+    "title": "Д. Э. Розенталь. «Управление в русском языке»",
+    "publisher": "Грамота.ру",
+    "url": "https://gramota.ru/biblioteka/slovari/upravlenie-v-russkom-yazyke"
+  },
+  "gramota_meta": {
+    "title": "Метасловарь русского языка",
+    "publisher": "Грамота.ру",
+    "url": "https://gramota.ru/meta/"
+  },
+  "gramota_difficulties": {
+    "title": "Словарь-справочник трудностей русского языка",
+    "publisher": "Грамота.ру",
+    "url": "https://gramota.ru/biblioteka/spravochniki/slovar-trudnostey"
+  }
+}
