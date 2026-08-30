@@ -1,11 +1,52 @@
 from pathlib import Path
 import json
+import os
 import re
+import tempfile
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
-ENTRIES = json.loads((DATA_DIR / "entries.json").read_text(encoding="utf-8"))
-ALIASES = json.loads((DATA_DIR / "aliases.json").read_text(encoding="utf-8"))
-SOURCES = json.loads((DATA_DIR / "sources.json").read_text(encoding="utf-8"))
+BUNDLED_DATA_DIR = Path(__file__).resolve().parent / "data"
+
+
+def _read_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_json(name: str):
+    """Load persistent data when valid, otherwise restore it from the bundle."""
+    bundled_path = BUNDLED_DATA_DIR / name
+    bundled_data = _read_json(bundled_path)
+    configured_dir = os.getenv("DATA_DIR")
+    if not configured_dir:
+        return bundled_data
+
+    persistent_path = Path(configured_dir) / name
+    try:
+        persistent_data = _read_json(persistent_path)
+        if type(persistent_data) is not type(bundled_data):
+            raise ValueError("Unexpected JSON root type")
+        return persistent_data
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+        temporary_path = None
+        try:
+            persistent_path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                dir=persistent_path.parent,
+                prefix=f".{name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary.write(bundled_path.read_bytes())
+                temporary_path = Path(temporary.name)
+            temporary_path.replace(persistent_path)
+        except OSError:
+            if temporary_path:
+                temporary_path.unlink(missing_ok=True)
+        return bundled_data
+
+
+ENTRIES = _load_json("entries.json")
+ALIASES = _load_json("aliases.json")
+SOURCES = _load_json("sources.json")
 
 BY_LEMMA = {e["lemma"]: e for e in ENTRIES}
 
