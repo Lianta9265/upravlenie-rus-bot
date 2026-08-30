@@ -1,33 +1,89 @@
-import os
+from html import escape
+from pathlib import Path
+import re
 import requests
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WELCOME_IMAGE = PROJECT_ROOT / "2.png"
+TELEGRAM_CHUNK_SIZE = 3000
 
 def tg_api(token: str, method: str) -> str:
     return f"https://api.telegram.org/bot{token}/{method}"
 
 
+def _split_text(text: str, limit: int = TELEGRAM_CHUNK_SIZE) -> list[str]:
+    """Split text at readable boundaries, safely below Telegram's 4096 limit."""
+    chunks = []
+    remaining = text.strip()
+    while len(remaining) > limit:
+        cut = remaining.rfind("\n\n", 0, limit + 1)
+        if cut < limit // 3:
+            cut = remaining.rfind("\n", 0, limit + 1)
+        if cut < limit // 3:
+            cut = remaining.rfind(" ", 0, limit + 1)
+        if cut < limit // 3:
+            cut = limit
+        chunks.append(remaining[:cut].rstrip())
+        remaining = remaining[cut:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+def _telegram_html(text: str) -> str:
+    """Convert the small Markdown subset Gemini uses into safe Telegram HTML."""
+    lines = []
+    for raw_line in text.splitlines():
+        line = escape(raw_line)
+        line = re.sub(r"^#{1,6}\s+(.+)$", r"<b>\1</b>", line)
+        line = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", line)
+        line = re.sub(r"__(.+?)__", r"<b>\1</b>", line)
+        line = re.sub(r"(?<!\*)\*([^*\n]+?)\*(?!\*)", r"<i>\1</i>", line)
+        line = re.sub(r"(?<!_)_([^_\n]+?)_(?!_)", r"<i>\1</i>", line)
+        line = re.sub(r"`([^`\n]+?)`", r"<code>\1</code>", line)
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def send_message(token: str, chat_id, text: str):
     if not text:
         return
-    chunks = []
-    while len(text) > 3900:
-        cut = text.rfind("\n", 0, 3900)
-        if cut < 1000:
-            cut = 3900
-        chunks.append(text[:cut])
-        text = text[cut:].lstrip()
-    chunks.append(text)
 
-    for chunk in chunks:
+    for chunk in _split_text(text):
         try:
             r = requests.post(
                 tg_api(token, "sendMessage"),
-                data={"chat_id": chat_id, "text": chunk},
+                data={
+                    "chat_id": chat_id,
+                    "text": _telegram_html(chunk),
+                    "parse_mode": "HTML",
+                },
                 timeout=30,
             )
             r.raise_for_status()
         except requests.RequestException:
             # ВАЖНО: не печатаем exception, потому что в нём может быть URL с токеном.
             print("Не удалось отправить сообщение в Telegram (без вывода секретных данных).")
+
+
+def send_welcome_image(token: str, chat_id) -> bool:
+    if not WELCOME_IMAGE.is_file():
+        print("Приветственная карточка 2.png не найдена.")
+        return False
+    try:
+        with WELCOME_IMAGE.open("rb") as image:
+            r = requests.post(
+                tg_api(token, "sendPhoto"),
+                data={"chat_id": chat_id},
+                files={"photo": (WELCOME_IMAGE.name, image, "image/png")},
+                timeout=30,
+            )
+        r.raise_for_status()
+        return True
+    except (OSError, requests.RequestException):
+        print("Не удалось отправить приветственную карточку.")
+        return False
 
 
 def process_message(message: dict, token: str, gemini_key: str, find_entry, render_entry, render_sources, ask_gemini):
@@ -38,12 +94,13 @@ def process_message(message: dict, token: str, gemini_key: str, find_entry, rend
 
     low = text.lower()
     if low in {"/start", "старт"}:
+        send_welcome_image(token, chat_id)
         send_message(
             token, chat_id,
-            "Здравствуйте! Я бот по управлению и сочетаемости русского языка.\n\n"
-            "Введите слово или словосочетание, например:\n"
-            "• заведующий\n• командовать\n• свойственный\n• оплатить\n\n"
-            "Команды: /help, /sources"
+            "Здравствуйте! Я помогу проверить управление и сочетаемость слов.\n\n"
+            "Отправьте слово или фразу — например: «оплатить проезд» или "
+            "«заведующая кафедрой».\n\n"
+            "Команды: /help · /sources"
         )
         return
 
