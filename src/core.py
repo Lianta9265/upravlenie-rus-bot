@@ -2,10 +2,10 @@ from pathlib import Path
 import json
 import re
 
-BASE = Path(__file__).resolve().parents[1]
-ENTRIES = json.loads((BASE / "data" / "entries.json").read_text(encoding="utf-8"))
-ALIASES = json.loads((BASE / "data" / "aliases.json").read_text(encoding="utf-8"))
-SOURCES = json.loads((BASE / "data" / "sources.json").read_text(encoding="utf-8"))
+DATA_DIR = Path(__file__).resolve().parent / "data"
+ENTRIES = json.loads((DATA_DIR / "entries.json").read_text(encoding="utf-8"))
+ALIASES = json.loads((DATA_DIR / "aliases.json").read_text(encoding="utf-8"))
+SOURCES = json.loads((DATA_DIR / "sources.json").read_text(encoding="utf-8"))
 
 BY_LEMMA = {e["lemma"]: e for e in ENTRIES}
 
