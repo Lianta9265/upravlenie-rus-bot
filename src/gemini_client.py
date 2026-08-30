@@ -41,6 +41,35 @@ def _extract_text(data: dict) -> str:
     return "\n".join(texts).strip()
 
 
+def _safe_error_value(value, sensitive_values) -> str:
+    text = str(value or "unknown").replace("\r", " ").replace("\n", " ")
+    for sensitive in sorted((str(x) for x in sensitive_values if x), key=len, reverse=True):
+        text = text.replace(sensitive, "[REDACTED]")
+    return text[:1000]
+
+
+def _log_api_error(response, payload: dict, api_key: str, query: str):
+    error = {}
+    try:
+        body = response.json()
+        if isinstance(body, dict) and isinstance(body.get("error"), dict):
+            error = body["error"]
+    except (ValueError, TypeError):
+        pass
+
+    sensitive_values = (api_key, payload.get("input"), query)
+    error_status = _safe_error_value(error.get("status"), sensitive_values)
+    error_message = _safe_error_value(error.get("message"), sensitive_values)
+    payload_fields = ",".join(sorted(payload.keys()))
+    prompt_length = len(payload.get("input", ""))
+    print(f"GEMINI_HTTP_STATUS={response.status_code}", flush=True)
+    print(f"GEMINI_ERROR_STATUS={error_status}", flush=True)
+    print(f"GEMINI_ERROR_MESSAGE={error_message}", flush=True)
+    print(f"GEMINI_MODEL={MODEL}", flush=True)
+    print(f"GEMINI_PAYLOAD_FIELDS={payload_fields}", flush=True)
+    print(f"GEMINI_PROMPT_LENGTH={prompt_length}", flush=True)
+
+
 def ask_gemini(query: str, api_key: str) -> str:
     if not api_key:
         return (
@@ -71,6 +100,7 @@ def ask_gemini(query: str, api_key: str) -> str:
         )
 
     if response.status_code != 200:
+        _log_api_error(response, payload, api_key, query)
         # Не показываем пользователю ключи, URL или технические детали.
         return (
             "В проверенной локальной базе точной статьи пока нет.\n"
