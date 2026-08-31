@@ -1,12 +1,56 @@
+import io
 from html import escape
 from pathlib import Path
 import re
 import requests
+from contextlib import redirect_stdout
+
+from gemini_client import MODEL
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WELCOME_IMAGE = PROJECT_ROOT / "2.png"
 TELEGRAM_CHUNK_SIZE = 3000
+BUILD_ID = "deploy-final-20260831-a1"
+
+
+def _gemini_diagnostic(ask_gemini, gemini_key: str) -> str:
+    captured = io.StringIO()
+    with redirect_stdout(captured):
+        result = ask_gemini("абстрагироваться", gemini_key)
+
+    fields = {}
+    allowed = {
+        "GEMINI_HTTP_STATUS": "HTTP",
+        "GEMINI_ERROR_STATUS": "error.status",
+        "GEMINI_ERROR_MESSAGE": "error.message",
+        "GEMINI_MODEL": "model",
+    }
+    for line in captured.getvalue().splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key in allowed:
+            fields[allowed[key]] = value
+
+    if "HTTP" in fields:
+        return "\n".join(
+            f"{name}: {fields.get(name, 'unknown')}"
+            for name in ("HTTP", "error.status", "error.message", "model")
+        )
+
+    failure_markers = (
+        "не удалось связаться с ИИ",
+        "ИИ временно недоступен",
+        "ИИ не вернул текстовый ответ",
+        "ИИ-подсказка отключена",
+    )
+    if any(marker in result for marker in failure_markers):
+        return (
+            "HTTP: unavailable\n"
+            "error.status: REQUEST_FAILED\n"
+            "error.message: Gemini request failed before a successful response\n"
+            f"model: {MODEL}"
+        )
+    return f"HTTP 200 / OK\nmodel: {MODEL}"
 
 def tg_api(token: str, method: str) -> str:
     return f"https://api.telegram.org/bot{token}/{method}"
@@ -93,6 +137,14 @@ def process_message(message: dict, token: str, gemini_key: str, find_entry, rend
         return
 
     low = text.lower()
+    if low == "/version":
+        send_message(token, chat_id, BUILD_ID)
+        return
+
+    if low == "/diag_gemini":
+        send_message(token, chat_id, _gemini_diagnostic(ask_gemini, gemini_key))
+        return
+
     if low in {"/start", "старт"}:
         send_welcome_image(token, chat_id)
         send_message(
